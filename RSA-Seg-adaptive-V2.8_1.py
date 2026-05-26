@@ -10,7 +10,7 @@ from sklearn.cluster import KMeans
 from typing import List, Optional, Tuple
 
 
-flaeche_pixel = 90000/946729
+flaeche_pixel = 90000/946729 #the value is used as a fall back default based on standard SEM images
 
 fixed_boundary = 5
 
@@ -36,10 +36,10 @@ def count_pixels(ubergabe_image, lower_color: int, upper_color: int, min_area: i
     # Set kernel
     kernel = np.ones((2, 2), np.uint8)
 
-    # 1. Fill small holes (close)
+    # fill small holes (close)
     mask_closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-    # 2. Remove small speckles (open)
+    # remove small speckles (open)
     mask_cleaned = cv2.morphologyEx(mask_closed, cv2.MORPH_OPEN, kernel)
     
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_cleaned, connectivity=4)
@@ -162,7 +162,7 @@ def build_tool_mask(
     Build a solid tool mask from a grayscale SEM image and create an adjusted image
     where tool pixels are offset brighter and background is forced to 0.
 
-    Returns:
+    returns:
         adjusted_image: uint8 grayscale, background 0, tool pixels offset by offset_value
         solid_tool_mask: uint8 mask (0/255) of tool including filled holes
         tool_mask: uint8 mask (0/255) of tool region before hole filling (largest CC)
@@ -171,14 +171,14 @@ def build_tool_mask(
     if image_gray is None or image_gray.ndim != 2:
         raise ValueError("build_tool_mask expects a 2D grayscale image (uint8).")
 
-    # 1) Rough foreground mask (non-background)
+    # rough foreground mask (non-background)
     _, rough_mask = cv2.threshold(image_gray, fixed_boundary, 255, cv2.THRESH_BINARY)
 
-    # 2) Morphological closing to connect regions
+    # morphological closing to connect regions
     kernel = np.ones(kernel_size, np.uint8)
     closed = cv2.morphologyEx(rough_mask, cv2.MORPH_CLOSE, kernel)
 
-    # 3) Keep largest connected component (assumed tool)
+    # keep largest connected component (assumed tool)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed)
 
     if num_labels <= 1:
@@ -198,18 +198,18 @@ def build_tool_mask(
     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
     tool_mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
 
-    # 4) Force top and left borders black for flood fill stability
+    # force top and left borders black for flood fill stability
     tool_mask[:1, :] = 0
     tool_mask[:, :1] = 0
 
-    # 5) Fill holes inside tool region (flood fill from outside)
+    # fill holes inside tool region (flood fill from outside)
     flood_mask = np.zeros((tool_mask.shape[0] + 2, tool_mask.shape[1] + 2), np.uint8)
     flood_filled = tool_mask.copy()
     cv2.floodFill(flood_filled, flood_mask, seedPoint=(0, 0), newVal=255)
     holes = cv2.bitwise_not(flood_filled)
     solid_tool_mask = cv2.bitwise_or(tool_mask, holes)
 
-    # 6) Build adjusted image:
+    # build adjusted image:
     #    - start from original gray
     #    - brighten tool pixels by offset_value
     #    - clamp to [0, 255]
@@ -222,14 +222,14 @@ def build_tool_mask(
         0, 255
     ).astype(np.uint8)
 
-    # Force background to 0 explicitly
+    # force background to 0 explicitly
     adjusted_image[~tool_pixels] = 0
 
-    # Optional: if you still want to zero out anything "too dark" inside tool area
+    # if you still want to zero out anything "too dark" inside tool area (optional)
     # (keep this only if it truly helps your downstream segmentation)
     adjusted_image[adjusted_image < offset_value] = 0
 
-    # 7) Optional debug saving (kept OUT of the core logic unless requested)
+    # optional debug saving (kept OUT of the core logic unless requested)
     if debug_dir:
         os.makedirs(debug_dir, exist_ok=True)
         cv2.imwrite(os.path.join(debug_dir, "Tool_Mask.jpg"), tool_mask)
@@ -254,15 +254,15 @@ def fill_dark_speckles(
     """
     assert img.ndim == 2 and tool_mask.ndim == 2
 
-    # 1) Black-hat highlights dark specks (closing - image)
+    # black-hat highlights dark specks (closing - image)
     se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (se_size, se_size))
     closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, se)
     blackhat = cv2.subtract(closed, img)
 
-    # Only consider inside the tool
+    # only consider inside the tool
     bh_inside = cv2.bitwise_and(blackhat, blackhat, mask=tool_mask)
 
-    # 2) Threshold black-hat to get candidate speckles
+    # threshold black-hat to get candidate speckles
     if thresh_mode.lower() == "otsu":
         # Otsu on nonzero bh values inside the tool
         vals = bh_inside[tool_mask == 255]
@@ -281,18 +281,18 @@ def fill_dark_speckles(
             t = np.percentile(vals, perc)
             _, th = cv2.threshold(bh_inside, int(t), 255, cv2.THRESH_BINARY)
 
-    # 3) Keep only small components = true speckles
+    # keep only small components = true speckles
     num, lab, stats, _ = cv2.connectedComponentsWithStats(th, connectivity=8)
     specks = np.zeros_like(th)
     for i in range(1, num):
         if stats[i, cv2.CC_STAT_AREA] <= max_area:
             specks[lab == i] = 255
 
-    # 4) Optional light open to clean stray pixels
+    # optional light open to clean stray pixels
     k = np.ones((3,3), np.uint8)
     specks = cv2.morphologyEx(specks, cv2.MORPH_OPEN, k, iterations=1)
 
-    # 5) Fill speckles (choose one)
+    # fill speckles (choose one)
     # a) Edge-preserving: inpaint from neighborhood
     out = cv2.inpaint(img, specks, inpaint_radius, cv2.INPAINT_TELEA)
 
@@ -300,10 +300,10 @@ def fill_dark_speckles(
     # local_mean = cv2.blur(img, (7,7), borderType=cv2.BORDER_REFLECT)
     # out = img.copy(); out[specks == 255] = local_mean[specks == 255]
 
-    # 6) Keep background at 0
+    # keep background at 0
     out[tool_mask == 0] = 0
 
-    # ---- Debug saves (optional) ----
+    # debug saves (optional)
     if debug_dir is not None:
         cv2.imwrite(os.path.join(debug_dir, "dbg_blackhat.png"), blackhat)
         cv2.imwrite(os.path.join(debug_dir, "dbg_bh_inside.png"), bh_inside)
@@ -377,11 +377,11 @@ def mask_generator(adjusted_image: np.ndarray, boundaries: list, save_dir: str =
 
     three_material_mode = len(boundaries) >= 3
 
-    # ── Coating mask (Ti, darkest, always present) ────────────────────────
+    # coating mask (Ti, darkest, always present)
     mask_titan = count_pixels(adjusted_image, boundaries[0], boundaries[1], 250, False)
     ti_pixel_count = cv2.countNonZero(mask_titan)
 
-    # ── Adhesion wear mask (Fe) ────────────────────────────────────────────
+    # adhesion wear mask (Fe)
     if three_material_mode:
         mask_eisen = count_pixels(adjusted_image, boundaries[1], boundaries[2], 50, False)
     else:
@@ -389,7 +389,7 @@ def mask_generator(adjusted_image: np.ndarray, boundaries: list, save_dir: str =
         mask_eisen = count_pixels(adjusted_image, boundaries[1], 255, 50, False)
     fe_pixel_count = cv2.countNonZero(mask_eisen)
 
-    # ── Substrate mask (W, brightest, 3-material mode only) ───────────────
+    # substrate mask (W, brightest, 3-material mode only (k=4))
     wo_pixel_count = 0
     if three_material_mode:
         mask_wolfram = count_pixels(adjusted_image, boundaries[2], 255, 1000, True)
@@ -398,14 +398,14 @@ def mask_generator(adjusted_image: np.ndarray, boundaries: list, save_dir: str =
         mask_eisen[mask_wolfram == 255] = 0
         fe_pixel_count = cv2.countNonZero(mask_eisen)
 
-    # ── Color overlay ──────────────────────────────────────────────────────
+    # color overlay
     color_image = cv2.cvtColor(adjusted_image, cv2.COLOR_GRAY2BGR)
     color_image[mask_titan == 255] = [255, 0, 0]   # Blue  = Coating
     color_image[mask_eisen == 255] = [0, 0, 255]   # Red   = Adhesion
     if three_material_mode:
         color_image[mask_wolfram == 255] = [0, 255, 0]  # Green = Substrate
 
-    # ── Optional save ──────────────────────────────────────────────────────
+    # optional save
     if save_dir:
         print(f"\nCoating pixels in folder {save_dir}: {ti_pixel_count}")
         time.sleep(0.5)
@@ -497,7 +497,7 @@ def auswertung_file_creator(auswertung_file_path: str, image_process_results: di
 
 
 
-
+# main
 
 def main_pipeline(
     folder_path: str = folder_path,
