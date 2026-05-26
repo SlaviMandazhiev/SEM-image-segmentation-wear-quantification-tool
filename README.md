@@ -7,7 +7,7 @@ The tool identifies and measures three material regions:
 - **Adhesion wear**: adhered workpiece material (intermediate intensity)
 - **Substrate**: exposed substrate material (brightest in SEM)
 
-For a full explanation of the algorithm, segmentation approach, and results, see the project report (PDF).
+For a bit fuller explanation of the algorithm, and segmentation approach see the project report (PDF) in this repo.
 
 ---
 
